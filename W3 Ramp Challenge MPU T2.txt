@@ -1,0 +1,224 @@
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+#include <LiquidCrystal.h>
+
+Adafruit_MPU6050 mpu;
+
+// LCD Shield pins (change if different)
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+int IN1 = 13;   // Left motor direction pin 1
+int IN2 = 12;   // Left motor direction pin 2
+int IN3 = 2;    // Right motor direction pin 1
+int IN4 = A3;    // Right motor direction pin 2
+
+// LINE SENSORS
+int sr = A1;    // Right sensor
+int sl = A2;    // Left sensor
+int svr = 0;    // Sensor value right
+int svl = 0;    // Sensor value left
+
+// MOTOR ENABLE PINS
+int enl = 11;   // Left motor enable (PWM)
+int enr = 3;    // Right motor enable (PWM)
+
+float yawAngle = 0.0;
+
+float pitch = 0.0;
+unsigned long lastTime;
+
+float maxPitchReached = 0.0;
+bool climbingMode = false;
+
+unsigned long lastUpdate = 0;
+bool spinning = false;
+
+// Peak stop control
+bool peakStopped = false;
+unsigned long peakStartTime = 0;
+
+// Robot states
+enum RobotState {
+  LINE_FOLLOW,
+  CLIMBING_UP,
+  AT_TOP,
+  ROTATING,
+  MOVING_DOWN,
+  AT_BOTTOM,
+  FINISH
+};
+
+RobotState state = LINE_FOLLOW;
+
+void stopMotors() {
+  analogWrite(enl, 0);
+  analogWrite(enr, 0);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+void lineFollow() {
+  // Forward
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  analogWrite(enl, 255);
+  analogWrite(enr, 255);
+}
+
+void rotate360() {
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  unsigned long now = millis();
+  float dt = (now - lastTime) / 1000.0;  // seconds
+  lastTime = now;
+
+  yawAngle -= g.gyro.x * dt * 180 / PI; // rad/s to degrees
+
+  // Start spinning motors
+  if (!spinning) {
+    spinning = true;
+    yawAngle = 0.0;
+
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+
+    analogWrite(enl, 200);
+    analogWrite(enr, 200);
+  }
+
+  Serial.print("Yaw: ");
+  Serial.println(yawAngle);
+
+  // Stop when 360° reached
+  if (abs(yawAngle) >= 184) {
+    stopMotors();
+    spinning = false;
+  }
+}
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+
+  lcd.begin(16, 2);
+  lcd.clear();
+  lcd.print("Initializing MPU");
+
+  if (!mpu.begin()) {
+    lcd.clear();
+    lcd.print("MPU ERROR!");
+    while (1);
+  }
+
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+
+  delay(500);
+  lcd.clear();
+  lcd.print("Ready");
+
+  lastTime = millis();
+}
+
+void loop() {
+  // MPU UPDATE
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  float dt = (millis() - lastTime) / 1000.0;
+  lastTime = millis();
+
+  float accPitch = atan2(a.acceleration.z, a.acceleration.x) * 180 / PI;
+  float gyroRatePitch = g.gyro.y * 180 / PI;
+
+  pitch = 0.98 * (pitch + gyroRatePitch * dt) + 0.02 * accPitch;
+
+  // Debug
+  Serial.print("Pitch: ");
+  Serial.println(pitch);
+
+  // STATE MACHINE 
+
+  switch (state) {
+
+    // Normal line following
+    case LINE_FOLLOW:
+      lineFollow();
+      if (pitch > 10.0) {  // Ramp start detected (> 10 degrees positive pitch)
+        state = CLIMBING_UP;
+        climbingMode = true;
+        lcd.setCursor(0, 1);
+        lcd.print("CLIMBING_UP  ");
+      }
+      break;
+
+    // Climbing up ramp and stopping at peak
+    case CLIMBING_UP:
+      // CRITICAL FIX: Only line follow until the peak is secured
+      if (!peakStopped) {
+        lineFollow();
+
+        if (pitch > maxPitchReached) {
+          maxPitchReached = pitch;
+        }
+      }
+
+      if (abs(pitch) < 5.0) {  // Peak detected (within 5 degrees of horizontal)
+        stopMotors();
+
+        if (!peakStopped) {
+          peakStartTime = millis();
+          lcd.clear();
+          lcd.print("PEAK DETECTED");
+          lcd.setCursor(0, 1);
+          lcd.print("Angle: ");
+          lcd.print(maxPitchReached, 1);
+          peakStopped = true; // Lock into the waiting phase
+        }
+
+        // Wait for the required duration
+        if (millis() - peakStartTime >= 4000) {
+          spinning = false;  // Ensure rotation flag is reset
+          state = ROTATING;
+          lcd.clear();
+          lcd.print("State: ROTATING");
+          peakStopped = false; // Reset for next cycle (if applicable)
+        }
+      }
+      break;
+
+    // Rotate 360°
+    case ROTATING:
+      rotate360();
+      if (!spinning) {  // Rotation finished
+        state = MOVING_DOWN;
+        lcd.setCursor(0, 1);
+        lcd.print("MOVING_DOWN  ");
+      }
+      break;
+
+    // Moving down ramp
+    case MOVING_DOWN:
+      lineFollow();
+      if (pitch < -5.0) {  // Bottom detected (small negative pitch suggests level ground)
+        stopMotors();
+        delay(1000); // Pause for 1 second at the bottom
+        state = FINISH;
+        lcd.clear();
+        lcd.print("State: FINISH");
+      }
+      break;
+
+    // Continue line following until end (or next condition)
+    case FINISH:
+      lineFollow();
+      break;
+  }
+}

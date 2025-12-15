@@ -1,0 +1,177 @@
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+// Motor driver pins
+int IN1 = 13;
+int IN2 = 12;
+int IN3 = 2;
+int IN4 = 1;
+
+// Line sensors
+int sr = A1;
+int sl = A2;
+int sm = A3;
+int svr = 0;
+int svl = 0;
+int svm = 0; // This will now hold the INVERTED value of the middle sensor
+
+// Motor enable pins
+int enl = 11;
+int enr = 3;
+float lspeed = 128;
+float rspeed = 128;
+int tspeed = 255;
+
+// Encoders
+int A = A4;
+int B = A5;
+int counterA = 0;
+int counterB = 0;
+int lastStateA;
+int lastStateB;
+int currentStateA;
+int currentStateB;
+
+int error = 0;
+int preverror = 0;
+
+// Physical constants
+const float WHEEL_DIAMETER_CM = 6.5;
+const int COUNTS_PER_REV = 20;
+const float DISTANCE_PER_COUNT_CM = (WHEEL_DIAMETER_CM * 3.14159) / COUNTS_PER_REV;
+
+// Distance total
+float totalDistanceCM = 0.0;
+
+void setup() {
+  lcd.begin(16, 2);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  pinMode(A, INPUT);
+  pinMode(B, INPUT);
+  pinMode(sr, INPUT);
+  pinMode(sl, INPUT);
+  pinMode(sm, INPUT);
+
+  pinMode(enl, OUTPUT);
+  pinMode(enr, OUTPUT);
+
+  lastStateA = digitalRead(A);
+  lastStateB = digitalRead(B);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Distance");
+}
+
+void loop() {
+  follow_line(100);
+  calculate_distance();
+
+  // LCD Display
+  lcd.setCursor(0, 0);
+  lcd.print("A:");
+  lcd.print(counterA);
+  lcd.print(" B:");
+  lcd.print(counterB);
+
+  lcd.setCursor(0, 1);
+  lcd.print("Dist: ");
+  lcd.print(totalDistanceCM, 1);
+  lcd.print(" cm");
+
+  delay(50);
+}
+
+// ENCODER DISTANCE CALCULATION
+void calculate_distance() {
+  static int prevCounterA = 0;
+  static int prevCounterB = 0;
+
+  currentStateA = digitalRead(A);
+  currentStateB = digitalRead(B);
+
+  if (currentStateA != lastStateA && currentStateA == 1) counterA++;
+  if (currentStateB != lastStateB && currentStateB == 1) counterB++;
+
+  int deltaA = counterA - prevCounterA;
+  int deltaB = counterB - prevCounterB;
+
+  float average_delta_counts = (float)(deltaA + deltaB) / 2.0;
+  totalDistanceCM += average_delta_counts * DISTANCE_PER_COUNT_CM;
+
+  prevCounterA = counterA;
+  prevCounterB = counterB;
+
+  lastStateA = currentStateA;
+  lastStateB = currentStateB;
+}
+
+// LINE FOLLOW FUNCTION - MIDDLE SENSOR INVERTED
+void follow_line(int speed) {
+  svl = digitalRead(sl);
+  int raw_svm = digitalRead(sm); // Read the physical state of the middle sensor
+  svr = digitalRead(sr);
+  
+  // INVERSION: The middle sensor (svm) logic is flipped from the raw reading.
+  // This ensures the original logic (e.g., HIGH=White, LOW=Black) holds true for svm as well.
+  svm = !raw_svm; 
+
+  // Move forward (Original: svl=HIGH, svm=LOW, svr=HIGH)
+  // This state now correctly means: L=White, M=Black, R=White (On Line)
+  if (svl == HIGH && svm == LOW && svr == HIGH) {
+    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+    analogWrite(enl, tspeed);
+    analogWrite(enr, tspeed);
+  }
+
+  // Sharp left (Original: svl=LOW, svm=LOW, svr=HIGH)
+  // Now means: L=Black, M=Black, R=White (Line far left)
+  else if (svl == LOW && svm == LOW && svr == HIGH) {
+    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);//LEFT
+    digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+    analogWrite(enl, tspeed);
+    analogWrite(enr, 0);
+  }
+
+  // Sharp right (Original: svl=HIGH, svm=LOW, svr=LOW)
+  // Now means: L=White, M=Black, R=Black (Line far right)
+  else if (svl == HIGH && svm == LOW && svr == LOW) {
+    digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);//RIGHT?
+    analogWrite(enl, 0);
+    analogWrite(enr, tspeed);
+  }
+
+  // Turn left (Original: svl=LOW, svm=HIGH, svr=HIGH)
+  // Now means: L=Black, M=White, R=White (Slightly left)
+  else if (svl == LOW && svm == HIGH && svr == HIGH) {
+    digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);//right
+    analogWrite(enl, speed);
+    analogWrite(enr, tspeed);
+  }
+
+  // Turn right (Original: svl=HIGH, svm=HIGH, svr=LOW)
+  // Now means: L=White, M=White, R=Black (Slightly right)
+  else if (svl == HIGH && svm == HIGH && svr == LOW) {
+    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+    analogWrite(enl, tspeed);
+    analogWrite(enr, speed);
+  }
+
+  // Stop (Original: svl=LOW, svm=LOW, svr=LOW)
+  // Now means: L=Black, M=Black, R=Black (Completely on line/intersection, which was your original stop condition)
+  /*else if (svl == LOW && svm == LOW && svr == LOW) {
+    digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+    analogWrite(enl, 0);
+    analogWrite(enr, 0);
+  }*/
+}

@@ -1,0 +1,155 @@
+#include <LiquidCrystal.h>
+
+// --- PIN CONFIGURATIONS ---
+
+// LCD pin connections: RS, E, D4, D5, D6, D7
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+// Left Motor Control (Motor A)
+int enl = 11; // Left Enable (PWM Pin)
+int in1 = 13; // Left Direction Pin 1
+int in2 = 12; // Left Direction Pin 2
+ 
+// Right Motor Control (Motor B)
+int enr = 3;  // Right Enable (PWM Pin)
+int in3 = 2;  // Right Direction Pin 1
+int in4 = 1;  // Right Direction Pin 2 (Note: Pin 1 is used for serial TX. Use with caution.)
+
+// IR sensors (Assumed to output LOW on Black Line, HIGH on White Surface)
+int sr = A2;  // Right sensor input
+int sl = A1;  // Left sensor input
+
+// --- SPEED SETTINGS ---
+// Main speed for moving straight (0-255). Keep it moderate for stability.
+const int MAIN_SPEED = 100;
+
+// High speed for quick turns (0-255).
+const int TURN_SPEED = 200; 
+
+// --- MOTOR CONTROL FUNCTIONS (For clarity and consistency) ---
+
+// Define FORWARD movement for both motors based on the corrected logic:
+// Left: in1=HIGH, in2=LOW | Right: in3=HIGH, in4=LOW
+void moveForward(int speed) {
+  // Left Motor Forward
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enl, speed);
+  
+  // Right Motor Forward
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  analogWrite(enr, speed); 
+}
+
+void turnLeft(int turnSpeed) {
+  // Stop Left Wheel, Drive Right Wheel Forward (Pivot Left)
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW); // Stop Left Motor Direction
+  analogWrite(enl, 0);     // Left motor off
+  
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW); // Right Motor Forward
+  analogWrite(enr, turnSpeed); 
+}
+
+void turnRight(int turnSpeed) {
+  // Drive Left Wheel Forward, Stop Right Wheel (Pivot Right)
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW); // Left Motor Forward
+  analogWrite(enl, turnSpeed); 
+  
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW); // Stop Right Motor Direction
+  analogWrite(enr, 0);     // Right motor off
+}
+
+void stopRobot() {
+  // Set all motor directions to LOW (or HIGH/HIGH for brake)
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+  // Set all enable pins to 0
+  analogWrite(enl, 0);
+  analogWrite(enr, 0);
+}
+
+// SETUP FUNCTION
+void setup() {
+
+  lcd.begin(16, 2);
+  lcd.print("Line Follower");
+  lcd.setCursor(0, 1);
+  lcd.print("Initializing...");
+  delay(1500);
+  lcd.clear();
+
+  // Motor pins setup
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
+  pinMode(enl, OUTPUT);
+  pinMode(enr, OUTPUT);
+
+  // Sensor pins setup
+  pinMode(sr, INPUT);
+  pinMode(sl, INPUT);
+  
+  stopRobot(); // Ensure robot starts stationary
+  
+  lcd.setCursor(0,0);
+  lcd.print("Ready. Start:");
+}
+
+// LINE FOLLOWING LOGIC
+void follow_line() {
+
+  int svl = digitalRead(sl); // Left sensor status
+  int svr = digitalRead(sr); // Right sensor status
+  
+  // Display status on LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("L:");
+  lcd.print(svl == LOW ? "Black" : "White");
+  lcd.setCursor(8, 0);
+  lcd.print("R:");
+  lcd.print(svr == LOW ? "Black" : "White");
+  
+  // 1. Both sensors on black (Line Found) → Forward
+  if (svl == LOW && svr == LOW) {
+    moveForward(MAIN_SPEED);
+    lcd.setCursor(0, 1);
+    lcd.print("Moving Forward");
+  }
+
+  // 2. Left sensor on white (Lost line to the left) → Turn Left
+  // Need to bring the robot left to find the line again.
+  else if (svl == HIGH && svr == LOW) {
+    turnLeft(TURN_SPEED);
+    lcd.setCursor(0, 1);
+    lcd.print("Turning Left");
+  }
+
+  // 3. Right sensor on white (Lost line to the right) → Turn Right
+  // Need to bring the robot right to find the line again.
+  else if (svl == LOW && svr == HIGH) {
+    turnRight(TURN_SPEED);
+    lcd.setCursor(0, 1);
+    lcd.print("Turning Right");
+  }
+
+  // 4. Both sensors on white (Lost line completely) → Stop
+  else {
+    stopRobot();
+    lcd.setCursor(0, 1);
+    lcd.print("Line Lost! Stop");
+  }
+}
+
+// LOOP FUNCTION
+void loop() {
+  follow_line();
+}

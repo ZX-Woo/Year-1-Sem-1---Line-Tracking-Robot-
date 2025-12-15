@@ -1,0 +1,82 @@
+#include <LiquidCrystal.h>
+
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7); 
+
+// MOTOR DRIVER PINS
+int IN1 = 13;   // Left motor direction pin 1
+int IN2 = 12;   // Left motor direction pin 2
+int IN3 = 2;    // Right motor direction pin 1
+int IN4 = 1;    // Right motor direction pin 2 
+int enl = 11;   // Left motor enable (PWM)
+int enr = 3;    // Right motor enable (PWM)
+
+// Ultrasonic
+const int trig = A4;
+const int echo = A5;
+
+long duration;
+int distance;
+
+void setup() 
+{
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  pinMode(enl, OUTPUT);
+  pinMode(enr, OUTPUT);
+
+  pinMode(trig, OUTPUT);
+  pinMode(echo, INPUT);
+}
+
+void loop() 
+{
+  // Ultrasonic Measurement
+  digitalWrite(trig, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trig, LOW);
+
+  duration = pulseIn(echo, HIGH);
+  distance = duration * 0.034 / 2;
+
+
+  // OBJECT NEAR TURN RIGHT
+  if (distance > 0 && distance < 42)
+  {
+    // Left motor forward
+    digitalWrite(IN1, HIGH);//turn right
+    digitalWrite(IN2, LOW);
+
+    // Right motor reverse
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+
+    analogWrite(enl, 220);
+    analogWrite(enr, 255);
+    //analogWrite(enl, 0);
+    //analogWrite(enr, 0);
+
+  }
+
+
+  // CLEAR MOVE FORWARD
+  else
+  {
+    // Both motors forward
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+
+    analogWrite(enl, 180);
+    analogWrite(enr, 180);
+    
+  }
+
+delay(50);
+}

@@ -1,0 +1,67 @@
+#include <LiquidCrystal.h>
+
+//LCD pin connections: RS, E, D4, D5, D6, D7
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+//Motor pins
+int ena = 11;
+int in1 = 13;
+int in2 = 12;
+int in3 = 2;
+int in4 = 1;
+int enb = 3;
+
+void setup() {
+  //LCD setup
+  lcd.begin (16,2);
+  lcd.print ("Initializing...");
+  delay(500);
+  lcd.clear();
+
+  //Motor setup
+  pinMode(ena, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
+  pinMode(enb, OUTPUT);
+
+  //Move forward
+  lcd.setCursor (0,0);
+  lcd.print ("Moving Forward");
+  delay(500);
+
+  digitalWrite (in1, LOW);
+  digitalWrite (in2, HIGH);
+  digitalWrite (in3, LOW);
+  digitalWrite (in4, HIGH);
+
+  analogWrite (ena, 255);
+  analogWrite (enb, 255);
+
+  for (int t = 1; t <= 10; t++) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Time:");
+    lcd.setCursor(0, 1);
+    lcd.print(t);
+    lcd.print("sec");
+    delay(1000);
+  
+  }
+  
+  //Stop Moving
+  digitalWrite (in1, LOW);
+  digitalWrite (in2, LOW);
+  digitalWrite (in3, LOW);
+  digitalWrite (in4, LOW);
+  analogWrite (ena, 0);
+  analogWrite (enb, 0);
+  
+  lcd.clear ();
+  lcd.setCursor (0,0);
+  lcd.print ("Stopped");
+}
+
+void loop () {
+}

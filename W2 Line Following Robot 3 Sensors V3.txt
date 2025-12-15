@@ -1,0 +1,193 @@
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);   // LCD connected to pins RS=8, E=9, D4=4, D5=5, D6=6, D7=7
+
+// MOTOR DRIVER PINS
+int IN1 = 13;   // Left motor direction pin 1
+int IN2 = 12;   // Left motor direction pin 2
+int IN3 = 2;    // Right motor direction pin 1
+int IN4 = 1;    // Right motor direction pin 2
+
+// LINE SENSORS
+int sr = A1;    // Right sensor
+int sl = A2;    // Left sensor
+int sm = A3;    // Middle sensor
+int svr = 0;    // Sensor value right
+int svl = 0;    // Sensor value left
+int svm = 0;    // Inverted middle sensor value
+
+// MOTOR ENABLE PINS
+int enl = 11;   // Left motor enable (PWM)
+int enr = 3;    // Right motor enable (PWM)
+float lspeed = 170;   // Default left speed
+float rspeed = 170;   // Default right speed
+int tspeed = 255;     // Top speed
+
+// ENCODERS
+int A = A4;     // Encoder A input
+int B = A5;     // Encoder B input
+int counterA = 0;   // Count pulses from encoder A
+int counterB = 0;   // Count pulses from encoder B
+int lastStateA;     // Last state of encoder A
+int lastStateB;     // Last state of encoder B
+int currentStateA;  // Current state of encoder A
+int currentStateB;  // Current state of encoder B
+
+// ERROR VARIABLES
+int error = 0;
+int preverror = 0;
+
+// PHYSICAL CONSTANTS
+const float WHEEL_DIAMETER_CM = 6.5;   // Wheel diameter in cm
+const int COUNTS_PER_REV = 20;         // Encoder counts per revolution
+const float DISTANCE_PER_COUNT_CM = (WHEEL_DIAMETER_CM * 3.14159) / COUNTS_PER_REV; // Distance per encoder tick
+
+// DISTANCE TRACKING
+float totalDistanceCM = 0.0;   // Total distance travelled
+
+// TIMING
+unsigned long startTime = 0;   // Start time of program
+
+// SETUP FUNCTION
+void setup() {
+  lcd.begin(16, 2);   // Initialize LCD with 16 columns and 2 rows
+
+  // Motor driver pins
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  // Encoder pins
+  pinMode(A, INPUT);
+  pinMode(B, INPUT);
+
+  // Line sensor pins
+  pinMode(sr, INPUT);
+  pinMode(sl, INPUT);
+  pinMode(sm, INPUT);
+
+  // Motor enable pins
+  pinMode(enl, OUTPUT);
+  pinMode(enr, OUTPUT);
+
+  // Initialize encoder states
+  lastStateA = digitalRead(A);
+  lastStateB = digitalRead(B);
+
+  // Record start time
+  startTime = millis();
+
+// LCD startup message
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  
+}
+
+// MAIN LOOP
+void loop() {
+  follow_line(120);        // Line following logic
+  calculate_distance();    // Update distance travelled
+
+  // Calculate elapsed time since start
+  unsigned long elapsedTime = millis() - startTime;
+
+  // LCD DISPLAY
+  lcd.setCursor(0, 0);
+  lcd.print("A:");
+  lcd.print(counterA);
+  lcd.print(" B:");
+  lcd.print(counterB);
+
+  lcd.setCursor(0, 1);
+  lcd.print("D:");
+  lcd.print(totalDistanceCM, 1);   // Show distance with 1 decimal place
+  lcd.print(" cm T:");
+  lcd.print(elapsedTime / 1000);   // Convert ms to seconds
+  lcd.print("s");
+}
+
+// ENCODER DISTANCE CALCULATION
+void calculate_distance() {
+  static int prevCounterA = 0;
+  static int prevCounterB = 0;
+
+  // Read encoder states
+  currentStateA = digitalRead(A);
+  currentStateB = digitalRead(B);
+
+  // Count pulses when state changes
+  if (currentStateA != lastStateA && currentStateA == 1) counterA++;
+  if (currentStateB != lastStateB && currentStateB == 1) counterB++;
+
+  // Calculate difference since last check
+  int deltaA = counterA - prevCounterA;
+  int deltaB = counterB - prevCounterB;
+
+  // Average counts from both wheels
+  float average_delta_counts = (float)(deltaA + deltaB) / 2.0;
+  totalDistanceCM += average_delta_counts * DISTANCE_PER_COUNT_CM;
+
+  // Update previous counters
+  prevCounterA = counterA;
+  prevCounterB = counterB;
+
+  // Update last states
+  lastStateA = currentStateA;
+  lastStateB = currentStateB;
+}
+
+// LINE FOLLOW FUNCTION - MIDDLE SENSOR INVERTED
+void follow_line(int speed) {
+  svl = digitalRead(sl);
+  int raw_svm = digitalRead(sm);   // Read raw middle sensor
+  svr = digitalRead(sr);
+  
+  // Invert middle sensor logic
+  svm = !raw_svm; 
+
+  // Forward
+  if (svl == HIGH && svm == LOW && svr == HIGH) {
+    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+    analogWrite(enl, speed);
+    analogWrite(enr, speed);
+  }
+  // Sharp left
+  else if (svl == LOW && svm == LOW && svr == HIGH) {
+    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+    analogWrite(enl, tspeed);
+    analogWrite(enr, tspeed);
+  }
+  // Sharp right
+  else if (svl == HIGH && svm == LOW && svr == LOW) {
+    digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+    analogWrite(enl, tspeed);
+    analogWrite(enr, tspeed);
+  }
+  // Slight right
+  else if (svl == HIGH && svm == HIGH && svr == LOW) {
+    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+    analogWrite(enr, rspeed);
+    analogWrite(enl, speed);
+  }
+  // Slight left
+  else if (svl == LOW && svm == HIGH && svr == HIGH) {
+    digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+    analogWrite(enl, lspeed);
+    analogWrite(enr, speed);
+  }
+  // Stop at junction
+  else if (svl == LOW && svm == LOW && svr == LOW) {
+    digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+    digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+    analogWrite(enl, 0);
+    analogWrite(enr, 0);
+
+    lcd.setCursor(0, 0);
+
+}
+}

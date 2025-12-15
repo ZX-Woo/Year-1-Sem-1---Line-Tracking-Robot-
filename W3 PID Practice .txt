@@ -1,0 +1,237 @@
+#include <LiquidCrystal.h>
+#include <PinChangeInterrupt.h>
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);  // LCD connected to pins RS=8, E=9, D4=4, D5=5, D6=6, D7=7
+
+// MOTOR DRIVER PINS
+int IN1 = 13;  // Left motor direction pin 1
+int IN2 = 12;  // Left motor direction pin 2
+int IN3 = 2;   // Right motor direction pin 1
+int IN4 = 1;   // Right motor direction pin 2
+
+// LINE SENSORS
+int sr = A1;  // Right sensor
+int sl = A2;  // Left sensor
+int sm = A3;  // Middle sensor
+int svr = 0;  // Sensor value right
+int svl = 0;  // Sensor value left
+int svm = 0;  // Inverted middle sensor value
+
+// MOTOR ENABLE PINS
+int enl = 11;  // Left motor enable (PWM)
+int enr = 3;   // Right motor enable (PWM)
+//float lspeed = 120;   // Default left speed
+//float rspeed = 120;   // Default right speed
+int tspeed = 220;  // Top speed
+
+// ENCODERS
+int A = A4;         // Encoder A input
+int B = A5;         // Encoder B input
+int counterA = 0;   // Count pulses from encoder A
+int counterB = 0;   // Count pulses from encoder B
+int lastStateA;     // Last state of encoder A
+int lastStateB;     // Last state of encoder B
+int currentStateA;  // Current state of encoder A
+int currentStateB;  // Current state of encoder B
+
+// ERROR VARIABLES
+float Kp = 100;
+float Ki = 0.0;
+float Kd = 0.5;
+int error = 0;
+int previousError = 0;
+float integral = 0;
+float derivative = 0;
+
+// PHYSICAL CONSTANTS
+const float WHEEL_DIAMETER_CM = 6.5;                                                 // Wheel diameter in cm
+const float COUNTS_PER_REV = 20.0;                                                   // Encoder counts per revolution
+const float DISTANCE_PER_COUNT_CM = (WHEEL_DIAMETER_CM * 3.14159) / COUNTS_PER_REV;  // Distance per encoder tick
+
+// DISTANCE TRACKING
+float totalDistanceCM = 0.0;  // Total distance travelled
+
+// TIMING
+unsigned long startTime = 0;  // Start time of program
+
+// SETUP FUNCTION
+void setup() {
+  lcd.begin(16, 2);  // Initialize LCD with 16 columns and 2 rows
+
+  // Motor driver pins
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  // Encoder pins
+  pinMode(A, INPUT);
+  pinMode(B, INPUT);
+
+  // Line sensor pins
+  pinMode(sr, INPUT);
+  pinMode(sl, INPUT);
+  pinMode(sm, INPUT);
+
+  // Motor enable pins
+  pinMode(enl, OUTPUT);
+  pinMode(enr, OUTPUT);
+
+  attachPCINT(digitalPinToPinChangeInterrupt(A), read_encoder_A, RISING);
+  attachPCINT(digitalPinToPinChangeInterrupt(B), read_encoder_B, RISING);
+
+
+
+  // Record start time
+  startTime = millis();
+
+  // LCD startup message
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  //Serial.begin(9600);
+}
+
+// MAIN LOOP
+void loop() {
+
+
+  follow_line_PID();     // Line following logic
+  calculate_distance();  // Update distance travelled
+
+  // Calculate elapsed time since start
+  unsigned long elapsedTime = millis() - startTime;
+
+  // LCD DISPLAY
+  lcd.setCursor(0, 0);
+  lcd.print("A:");
+  lcd.print(digitalRead(A1));
+  lcd.print(" B:");
+  lcd.print(digitalRead(A2));
+  lcd.setCursor(0, 1);
+  lcd.print("D:");
+  lcd.print(digitalRead(A3));
+  lcd.print(previousError);
+}
+
+
+void read_encoder_A() {
+  counterA++;
+}
+
+void read_encoder_B() {
+  counterB++;
+}
+// ENCODER DISTANCE CALCULATION
+float calculate_distance() {
+
+  int deltaA = counterA;
+  int deltaB = counterB;
+
+
+  // Average counts from both wheels
+  float average_delta_counts = (float)(deltaA + deltaB) / 2.0;
+  totalDistanceCM = average_delta_counts * DISTANCE_PER_COUNT_CM;
+}
+
+// LINE FOLLOW FUNCTION - MIDDLE SENSOR INVERTED
+void follow_line_PID() {
+
+  // Read sensors
+  int left = digitalRead(sl);    // HIGH = white, LOW = black
+  int right = digitalRead(sr);   // HIGH = white, LOW = black
+  int middle = digitalRead(sm);  // LOW = white, HIGH = black
+
+
+  // 1. SPECIAL CASES
+
+  // ALL WHITE = LOST LINE → follow previous direction
+  if (left == HIGH && middle == LOW && right == HIGH) {
+    if (previousError < 0) {
+      //Serial.println('a');
+      //delay(100);
+      digitalWrite(IN1, LOW);
+      digitalWrite(IN2, HIGH);
+      digitalWrite(IN3, HIGH);
+      digitalWrite(IN4, LOW);
+      analogWrite(enl, 230);
+      analogWrite(enr, 230);
+      return;
+    }  // was turning right
+    else if (previousError > 0) {
+      
+      //Serial.println('b');
+      //delay(100);
+      digitalWrite(IN1, HIGH);
+      digitalWrite(IN2, LOW);
+      digitalWrite(IN3, LOW);
+      digitalWrite(IN4, HIGH);
+      analogWrite(enl, 230);
+      analogWrite(enr, 230);
+      return;
+    }
+  }
+  
+
+  // T-JUNCTION DETECTI
+
+  // 2. NORMAL LINE FOLLOWING
+
+  // MIDDLE BLACK = centered on line
+  else if (middle == HIGH && left == HIGH && right == HIGH) {
+    error = 0;
+    //Serial.println('c');
+    //delay(100);
+  }
+
+  // Black on left → drifting LEFT → steer left
+  else if (left == LOW && right == HIGH) {
+    error = -3;
+    //Serial.println('d');
+    //delay(100);
+  }
+
+  // Black on right → drifting RIGHT → steer left
+  else if (left == HIGH && right == LOW) {
+    error = +3;
+    //Serial.println('e');
+    //delay(100);
+  }
+
+  // Strong left reading
+  else if (left == LOW && middle == LOW && right == HIGH) {
+    error = -10;
+    //Serial.println('f');
+    //delay(100);
+  }
+
+  // Strong right reading
+  else if (left == HIGH && middle == LOW && right == LOW) {
+    error = +10;
+    //Serial.println('g');
+    //delay(100);
+  }
+
+
+
+  // 3. PID CALCULATION
+  integral += error;
+  derivative = error - previousError;
+  previousError = error;
+
+  float pid = Kp * error + Ki * integral + Kd * derivative;
+
+
+  // 4. MOTOR SPEED OUTPUT
+  int baseSpeed = 140;
+  int leftSpeed = constrain(baseSpeed + pid, 0, 255);
+  int rightSpeed = constrain(baseSpeed - pid, 0, 255);
+
+
+  // forward direction
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+  analogWrite(enl, leftSpeed);
+  analogWrite(enr, rightSpeed);
+}
